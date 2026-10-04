@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1A2B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Teleprompter con cámara</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --outer:#D6DDE6; --ink:#0E1A2B; --paper:#F5F7FA; --muted:#A9B6C6;
+  --tally:#E5383B; --cue:#FFC145; --glass:rgba(14,26,43,.70); --line:rgba(245,247,250,.16);
+  --bg-op:.55;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){ --outer:#04070C; } }
+:root[data-theme="dark"]{ --outer:#04070C; }
+*,*::before,*::after{box-sizing:border-box}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  margin:0;height:100%;background:var(--outer);color:var(--paper);
+  font-family:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  display:grid;place-items:center;overflow:hidden;
+  -webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;
+}
+/* Escenario 9:16 */
+.stage{
+  position:relative;height:min(100%, calc(100vw * 16 / 9));aspect-ratio:9/16;max-width:100vw;
+  background:var(--ink);overflow:hidden;
+}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:var(--ink)}
+video.mirror{transform:scaleX(-1)}
+
+.cam-empty{
+  position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:0 12%;
+  color:var(--muted);font-size:.95rem;line-height:1.5;
+}
+.cam-empty strong{display:block;color:var(--paper);font-size:1.1rem;margin-bottom:.35rem}
+.cam-empty.hidden{display:none}
+
+/* Barra superior */
+.topbar{
+  position:absolute;top:0;left:0;right:0;z-index:4;display:flex;align-items:center;gap:.6rem;
+  padding:.7rem .85rem;background:linear-gradient(var(--glass),transparent);font-size:.85rem;
+}
+.tally{width:.7rem;height:.7rem;border-radius:50%;background:#56657A;flex:none}
+.tally.live{background:var(--tally);box-shadow:0 0 0 4px rgba(229,56,59,.25)}
+.tally.wait{background:var(--cue)}
+.topbar .state{font-weight:700}
+.topbar .stats{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* Área de lectura: en la mitad superior, cerca del lente frontal */
+.prompter{
+  position:absolute;left:0;right:0;top:2.6rem;height:48%;z-index:2;overflow:hidden;
+  background:rgba(14,26,43,var(--bg-op));touch-action:none;cursor:grab;
+  -webkit-mask-image:linear-gradient(transparent 0,#000 14%,#000 82%,transparent 100%);
+          mask-image:linear-gradient(transparent 0,#000 14%,#000 82%,transparent 100%);
+}
+.prompter-inner{height:100%}
+.prompter-inner.flip{transform:scaleX(-1)}
+.scroll{will-change:transform;padding:0 7%}
+.scroll .text{font-size:34px;line-height:1.38;font-weight:700;text-shadow:0 2px 6px rgba(0,0,0,.55)}
+.scroll .text p{margin:0 0 .9em}
+.guide{
+  position:absolute;left:0;right:0;z-index:3;height:0;border-top:1px dashed rgba(255,193,69,.55);pointer-events:none;
+}
+.guide::before,.guide::after{
+  content:"";position:absolute;top:-9px;border:9px solid transparent;
+}
+.guide::before{left:0;border-left-color:var(--cue)}
+.guide::after{right:0;border-right-color:var(--cue)}
+
+.countdown{
+  position:absolute;inset:0;z-index:6;display:none;place-items:center;
+  font-size:7rem;font-weight:700;color:var(--cue);background:rgba(14,26,43,.35);pointer-events:none;
+}
+.countdown.on{display:grid}
+
+/* Panel de controles */
+.dock{
+  position:absolute;left:0;right:0;bottom:0;z-index:5;padding:.65rem .75rem .8rem;
+  background:var(--glass);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-top:1px solid var(--line);display:grid;gap:.6rem;transition:opacity .3s;
+}
+.dock.dim{opacity:.28}
+.row{display:flex;align-items:center;gap:.5rem}
+.row.cam{gap:.4rem}
+button{
+  font:inherit;color:var(--paper);background:rgba(245,247,250,.10);border:1px solid var(--line);
+  border-radius:12px;min-height:44px;padding:0 .8rem;display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
+  cursor:pointer;font-size:.88rem;touch-action:manipulation;
+}
+button:active{transform:scale(.97)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--cue);outline-offset:2px}
+button:disabled{opacity:.4;cursor:default}
+button svg{width:20px;height:20px;flex:none}
+.icon{width:44px;padding:0}
+.play{flex:1;background:var(--paper);color:var(--ink);font-weight:700;font-size:1rem;border:none}
+.cam button{flex:1;padding:0 .4rem;font-size:.8rem}
+.cam .icon{flex:none}
+.cam .start{background:rgba(229,56,59,.22);border-color:rgba(229,56,59,.6)}
+.speed{display:flex;align-items:center;gap:.5rem;width:100%}
+.speed output{min-width:5.6rem;text-align:right;font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+input[type=range]{flex:1;accent-color:var(--cue);height:32px}
+
+/* Hoja de ajustes */
+.sheet{
+  position:absolute;inset:auto 0 0 0;z-index:8;max-height:88%;overflow:auto;
+  background:var(--ink);border-top:1px solid var(--line);border-radius:18px 18px 0 0;
+  padding:1rem 1rem 1.2rem;transform:translateY(105%);transition:transform .28s ease;
+  -webkit-user-select:text;user-select:text;
+}
+.sheet.open{transform:none}
+.sheet h2{font-size:1.05rem;margin:0 0 .8rem;display:flex;justify-content:space-between;align-items:center}
+.sheet label{display:block;font-size:.85rem;color:var(--muted);margin:.85rem 0 .35rem}
+textarea{
+  width:100%;min-height:9rem;resize:vertical;font:inherit;font-size:.95rem;line-height:1.45;
+  color:var(--paper);background:rgba(245,247,250,.06);border:1px solid var(--line);border-radius:12px;padding:.7rem;
+}
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.55rem 0;border-bottom:1px solid var(--line);font-size:.92rem}
+.toggle input{width:22px;height:22px;accent-color:var(--cue)}
+.hint{font-size:.78rem;color:var(--muted);line-height:1.45;margin-top:.9rem}
+.scrim{position:absolute;inset:0;z-index:7;background:rgba(0,0,0,.4);display:none}
+.scrim.on{display:block}
+
+@media (prefers-reduced-motion:reduce){ .sheet,.dock{transition:none} }
+</style>
+</head>
+<body>
+<main class="stage" id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <div class="cam-empty" id="camEmpty">
+    <div><strong>Cámara apagada</strong><span id="camMsg">Toca «Iniciar cámara» para ver tu imagen detrás del texto.</span></div>
+  </div>
+
+  <header class="topbar">
+    <span class="tally" id="tally" aria-hidden="true"></span>
+    <span class="state" id="camState">Cámara apagada</span>
+    <span class="stats" id="stats">—</span>
+  </header>
+
+  <section class="prompter" id="prompter" aria-label="Texto del teleprompter. Toca para pausar o continuar; arrastra para mover.">
+    <div class="prompter-inner" id="prompterInner">
+      <div class="scroll" id="scroll"><div class="text" id="text"></div></div>
+    </div>
+  </section>
+  <div class="guide" id="guide" aria-hidden="true"></div>
+  <div class="countdown" id="countdown" aria-live="assertive"></div>
+
+  <nav class="dock" id="dock">
+    <div class="row">
+      <button class="icon" id="btnReset" aria-label="Volver al inicio del texto" title="Volver al inicio (Inicio)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+      </button>
+      <button class="play" id="btnPlay">
+        <svg id="icoPlay" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>
+        <span id="lblPlay">Leer</span>
+      </button>
+      <button class="icon" id="btnSettings" aria-label="Ajustes y guion" title="Ajustes y guion">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+      </button>
+    </div>
+    <div class="speed">
+      <button class="icon" id="slower" aria-label="Más lento">−</button>
+      <input type="range" id="speed" min="1" max="20" step="1" value="6" aria-label="Velocidad de lectura">
+      <button class="icon" id="faster" aria-label="Más rápido">+</button>
+      <output id="speedOut" for="speed">6</output>
+    </div>
+    <div class="row cam">
+      <button class="start" id="camStart">Iniciar cámara</button>
+      <button id="camStop" disabled>Detener</button>
+      <button id="camRestart" disabled>Reiniciar</button>
+      <button class="icon" id="camFlip" aria-label="Cambiar entre cámara frontal y trasera" title="Cambiar cámara">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l3 3-3 3"/><path d="M20 6H8a4 4 0 0 0-4 4v1"/><path d="M7 21l-3-3 3-3"/><path d="M4 18h12a4 4 0 0 0 4-4v-1"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="sheet" id="sheet" aria-label="Ajustes">
+    <h2>Guion y ajustes <button id="btnClose">Listo</button></h2>
+    <label for="script">Guion (separa párrafos con una línea en blanco)</label>
+    <textarea id="script" spellcheck="true"></textarea>
+
+    <label for="fontSize">Tamaño de letra: <span id="fontOut">34</span> px</label>
+    <input type="range" id="fontSize" min="20" max="64" step="1" value="34">
+
+    <label for="guidePos">Posición de la línea de lectura</label>
+    <input type="range" id="guidePos" min="15" max="70" step="1" value="35">
+
+    <label for="bgOp">Oscurecer fondo del texto</label>
+    <input type="range" id="bgOp" min="0" max="90" step="5" value="55">
+
+    <div class="toggle"><span>Espejar texto (para cristal reflector)</span><input type="checkbox" id="flipText"></div>
+    <div class="toggle"><span>Espejar vista de cámara frontal</span><input type="checkbox" id="mirrorVideo" checked></div>
+    <div class="toggle"><span>Cuenta regresiva de 3 s al leer</span><input type="checkbox" id="useCountdown" checked></div>
+
+    <label>Diagnóstico de cámara</label>
+    <button id="btnDiag" style="width:100%">Revisar por qué no conecta</button>
+    <pre id="diag" style="white-space:pre-wrap;font-size:.78rem;line-height:1.5;color:var(--muted);margin:.6rem 0 0"></pre>
+
+    <p class="hint">Atajos para teclado o control Bluetooth: Espacio o Av Pág = leer/pausar · ↑ ↓ = velocidad · Inicio = volver al principio. Toca el texto para pausar; arrástralo para ubicarte. La cámara exige conexión segura (HTTPS).</p>
+  </aside>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const video=$('video'), camEmpty=$('camEmpty'), camMsg=$('camMsg'), tally=$('tally'), camState=$('camState');
+  const prompter=$('prompter'), inner=$('prompterInner'), scrollEl=$('scroll'), textEl=$('text'), guide=$('guide');
+  const dock=$('dock'), stats=$('stats'), speed=$('speed'), speedOut=$('speedOut'), countdown=$('countdown');
+  const btnPlay=$('btnPlay'), lblPlay=$('lblPlay'), icoPlay=$('icoPlay');
+  const camStartB=$('camStart'), camStopB=$('camStop'), camRestartB=$('camRestart');
+  const sheet=$('sheet'), scrim=$('scrim'), scriptTa=$('script');
+
+  const DEFAULT_SCRIPT =
+`Buenos días. En este video revisaremos los conceptos básicos de estequiometría.
+
+La estequiometría estudia las relaciones cuantitativas entre reactivos y productos en una reacción química balanceada.
+
+Antes de calcular cualquier cantidad, verificamos que la ecuación cumpla la ley de conservación de la masa.
+
+Luego convertimos las masas a moles usando la masa molar de cada sustancia.
+
+Con la relación molar de la ecuación balanceada obtenemos los moles del producto, y finalmente los convertimos de nuevo a gramos.
+
+Edita este texto desde el botón de ajustes.`;
+
+  /* ---------- Persistencia ---------- */
+  const store = {
+    get(k, d){ try{ const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); }catch{ return d; } },
+    set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
+  };
+  const cfg = Object.assign({ level:6, font:34, guide:35, bg:55, flip:false, mirror:true, cd:true, facing:'user' }, store.get('tp-cfg', {}));
+  const saveCfg = () => store.set('tp-cfg', cfg);
+
+  /* ---------- Guion ---------- */
+  const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let words = 0;
+  function renderScript(src){
+    const paras = src.trim().split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+    textEl.innerHTML = paras.map(p => `<p>${esc(p).replace(/\n/g,'<br>')}</p>`).join('');
+    words = (src.match(/\S+/g) || []).length;
+    layout();
+  }
+
+  /* ---------- Geometría ---------- */
+  let guideY = 0;
+  function layout(){
+    const h = prompter.clientHeight;
+    guideY = Math.round(h * cfg.guide / 100);
+    scrollEl.style.paddingTop = guideY + 'px';
+    scrollEl.style.paddingBottom = h + 'px';
+    guide.style.top = (prompter.offsetTop + guideY) + 'px';
+    pos = Math.min(pos, maxPos());
+    render();
+  }
+  const maxPos = () => Math.max(0, textEl.offsetHeight - parseFloat(getComputedStyle(textEl).fontSize));
+
+  /* ---------- Motor de desplazamiento ---------- */
+  let pos = 0, playing = false, last = 0, cdTimer = null;
+  // px/s escalado con el tamaño de letra, así el nivel equivale a un ritmo de lectura similar
+  const pxPerSec = () => cfg.level * 6 * (cfg.font / 34);
+
+  function render(){
+    scrollEl.style.transform = `translate3d(0,${-pos}px,0)`;
+    const h = textEl.offsetHeight || 1;
+    const wpm = Math.round(words / h * pxPerSec() * 60);
+    const rem = Math.max(0, (maxPos() - pos) / pxPerSec());
+    const mm = Math.floor(rem / 60), ss = String(Math.round(rem % 60)).padStart(2,'0');
+    stats.textContent = `≈${wpm} ppm · ${mm}:${ss}`;
+    speedOut.textContent = `Nivel ${cfg.level}`;
+  }
+  function frame(t){
+    if(!playing) return;
+    const dt = Math.min((t - last) / 1000, 0.1); last = t;
+    pos += pxPerSec() * dt;
+    if(pos >= maxPos()){ pos = maxPos(); render(); pause(); return; }
+    render();
+    requestAnimationFrame(frame);
+  }
+  function play(){
+    if(playing || cdTimer) return;
+    if(pos >= maxPos()) pos = 0;
+    const go = () => { playing = true; last = performance.now(); setPlayUI(); requestAnimationFrame(frame); wake(true); };
+    if(cfg.cd){
+      let n = 3; countdown.textContent = n; countdown.classList.add('on'); setPlayUI(true);
+      cdTimer = setInterval(() => {
+        n--; if(n > 0){ countdown.textContent = n; return; }
+        clearInterval(cdTimer); cdTimer = null; countdown.classList.remove('on'); go();
+      }, 1000);
+    } else go();
+  }
+  function pause(){
+    if(cdTimer){ clearInterval(cdTimer); cdTimer = null; countdown.classList.remove('on'); }
+    playing = false; setPlayUI();
+    if(!stream) wake(false);
+  }
+  const toggle = () => (playing || cdTimer) ? pause() : play();
+  function resetText(){ pause(); pos = 0; render(); }
+  function setPlayUI(counting){
+    const active = playing || counting;
+    lblPlay.textContent = active ? 'Pausar' : (pos > 0 && pos < maxPos() ? 'Continuar' : 'Leer');
+    icoPlay.innerHTML = active ? '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>' : '<path d="M7 4.5v15l13-7.5z"/>';
+    dock.classList.toggle('dim', active);
+  }
+  function setLevel(v){
+    cfg.level = Math.min(20, Math.max(1, v)); speed.value = cfg.level; saveCfg(); render();
+  }
+
+  /* ---------- Gestos sobre el texto ---------- */
+  let drag = null;
+  prompter.addEventListener('pointerdown', e => {
+    drag = { y:e.clientY, p:pos, moved:false, was:playing };
+    prompter.setPointerCapture(e.pointerId);
+  });
+  prompter.addEventListener('pointermove', e => {
+    if(!drag) return;
+    const dy = e.clientY - drag.y;
+    if(Math.abs(dy) > 6){ drag.moved = true; if(playing){ playing = false; } }
+    if(drag.moved){ pos = Math.min(maxPos(), Math.max(0, drag.p - dy)); render(); }
+  });
+  prompter.addEventListener('pointerup', () => {
+    if(!drag) return;
+    if(!drag.moved) toggle();
+    else if(drag.was){ playing = true; last = performance.now(); requestAnimationFrame(frame); }
+    setPlayUI(); drag = null;
+  });
+  prompter.addEventListener('pointercancel', () => { drag = null; });
+  dock.addEventListener('pointerdown', () => dock.classList.remove('dim'));
+
+  /* ---------- Cámara ---------- */
+  let stream = null, lastError = 'ninguno';
+  function setCam(state, msg){
+    tally.className = 'tally' + (state === 'live' ? ' live' : state === 'wait' ? ' wait' : '');
+    camState.textContent = { live:'En vivo', wait:'Conectando…', off:'Cámara apagada', err:'Sin cámara' }[state];
+    camEmpty.classList.toggle('hidden', state === 'live');
+    if(msg) camMsg.textContent = msg;
+    camStartB.disabled = state === 'live' || state === 'wait';
+    camStopB.disabled = state !== 'live';
+    camRestartB.disabled = state === 'off' || state === 'wait';
+  }
+  const inFrame = (() => { try{ return window.self !== window.top; }catch{ return true; } })();
+  const policyBlocks = () => {
+    const p = document.permissionsPolicy || document.featurePolicy;
+    try{ return p && typeof p.allowsFeature === 'function' && !p.allowsFeature('camera'); }catch{ return false; }
+  };
+  const inAppBrowser = /FBAN|FBAV|Instagram|WhatsApp|Line\/|MicroMessenger|TikTok|Snapchat/i.test(navigator.userAgent);
+
+  // Intenta de la configuración más exigente a la más simple
+  async function openStream(){
+    const attempts = [
+      { audio:false, video:{ facingMode:{ ideal:cfg.facing }, width:{ ideal:1280 }, height:{ ideal:720 } } },
+      { audio:false, video:{ facingMode:cfg.facing } },
+      { audio:false, video:true }
+    ];
+    let lastErr;
+    for(const c of attempts){
+      try{ return await navigator.mediaDevices.getUserMedia(c); }
+      catch(e){
+        lastErr = e;
+        if(e.name === 'NotAllowedError' || e.name === 'SecurityError') break; // reintentar no sirve
+      }
+    }
+    throw lastErr;
+  }
+
+  async function startCamera(){
+    if(!window.isSecureContext){ setCam('err','La cámara solo funciona con HTTPS o en localhost. Publica la página con un certificado SSL.'); return; }
+    if(!navigator.mediaDevices?.getUserMedia){ setCam('err', inAppBrowser ? 'Estás en el navegador interno de otra app. Abre el enlace en Chrome o Safari.' : 'Este navegador no permite acceder a la cámara.'); return; }
+    if(inFrame && policyBlocks()){ setCam('err','Esta vista incrustada no tiene permiso de cámara. Abre la página directamente en tu servidor con HTTPS (ver Ajustes › Diagnóstico).'); return; }
+    stopTracks();
+    setCam('wait');
+    try{
+      stream = await openStream();
+      stream.getVideoTracks().forEach(t => t.addEventListener('ended', () => { stopCamera(); setCam('off','La cámara se desconectó. Toca «Reiniciar» o «Iniciar cámara».'); }));
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      applyMirror();
+      setCam('live');
+      wake(true);
+    }catch(err){
+      stream = null;
+      const m = {
+        NotAllowedError: inFrame ? 'La vista incrustada bloqueó la cámara. Abre la página directamente en tu servidor con HTTPS.' : 'Permiso denegado. Habilita la cámara para este sitio en los ajustes del navegador (candado junto a la dirección).',
+        NotFoundError:'No se encontró ninguna cámara en el dispositivo.',
+        NotReadableError:'La cámara está en uso por otra aplicación. Ciérrala y toca «Reiniciar».',
+        OverconstrainedError:'La cámara no admite la configuración solicitada. Prueba cambiar de cámara.',
+        SecurityError:'El navegador bloqueó la cámara en esta página. Ábrela directamente en tu servidor con HTTPS.'
+      }[err.name] || `No se pudo iniciar la cámara (${err.name || err}).`;
+      lastError = `${err.name || 'Error'}: ${err.message || ''}`;
+      setCam('err', m);
+    }
+  }
+  function stopTracks(){ if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; } video.srcObject = null; }
+  function stopCamera(){ stopTracks(); setCam('off','Toca «Iniciar cámara» para ver tu imagen detrás del texto.'); if(!playing) wake(false); }
+  async function restartCamera(){ stopTracks(); setCam('wait'); await new Promise(r => setTimeout(r, 300)); startCamera(); }
+  function applyMirror(){ video.classList.toggle('mirror', cfg.mirror && cfg.facing === 'user'); }
+  $('camFlip').addEventListener('click', () => {
+    cfg.facing = cfg.facing === 'user' ? 'environment' : 'user'; saveCfg();
+    if(stream) restartCamera(); else applyMirror();
+  });
+
+  /* ---------- Mantener pantalla encendida ---------- */
+  let lock = null;
+  async function wake(on){
+    try{
+      if(on && !lock && 'wakeLock' in navigator){ lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; }); }
+      if(!on && lock){ await lock.release(); lock = null; }
+    }catch{}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible' && (playing || stream)) wake(true);
+    if(document.visibilityState === 'hidden') pause();
+  });
+
+  /* ---------- Ajustes ---------- */
+  function applyCfg(){
+    textEl.style.fontSize = cfg.font + 'px'; $('fontOut').textContent = cfg.font;
+    document.documentElement.style.setProperty('--bg-op', cfg.bg / 100);
+    inner.classList.toggle('flip', cfg.flip);
+    $('fontSize').value = cfg.font; $('guidePos').value = cfg.guide; $('bgOp').value = cfg.bg;
+    $('flipText').checked = cfg.flip; $('mirrorVideo').checked = cfg.mirror; $('useCountdown').checked = cfg.cd;
+    speed.value = cfg.level; applyMirror(); layout();
+  }
+  const openSheet = () => { pause(); sheet.classList.add('open'); scrim.classList.add('on'); };
+  const closeSheet = () => { sheet.classList.remove('open'); scrim.classList.remove('on'); };
+  $('btnSettings').addEventListener('click', openSheet);
+  $('btnClose').addEventListener('click', closeSheet);
+  scrim.addEventListener('click', closeSheet);
+  scriptTa.addEventListener('input', () => { store.set('tp-script', scriptTa.value); renderScript(scriptTa.value); });
+  $('fontSize').addEventListener('input', e => { cfg.font = +e.target.value; saveCfg(); applyCfg(); });
+  $('guidePos').addEventListener('input', e => { cfg.guide = +e.target.value; saveCfg(); layout(); });
+  $('bgOp').addEventListener('input', e => { cfg.bg = +e.target.value; saveCfg(); applyCfg(); });
+  $('flipText').addEventListener('change', e => { cfg.flip = e.target.checked; saveCfg(); applyCfg(); });
+  $('mirrorVideo').addEventListener('change', e => { cfg.mirror = e.target.checked; saveCfg(); applyMirror(); });
+  $('useCountdown').addEventListener('change', e => { cfg.cd = e.target.checked; saveCfg(); });
+
+  /* ---------- Diagnóstico ---------- */
+  $('btnDiag').addEventListener('click', async () => {
+    const out = [];
+    const ok = b => b ? 'sí' : 'NO';
+    out.push(`Conexión segura (HTTPS): ${ok(window.isSecureContext)}`);
+    out.push(`API de cámara disponible: ${ok(!!navigator.mediaDevices?.getUserMedia)}`);
+    out.push(`Página incrustada (iframe): ${inFrame ? 'sí' : 'no'}`);
+    out.push(`Política del iframe permite cámara: ${policyBlocks() ? 'NO' : 'sí o no declarada'}`);
+    out.push(`Navegador interno de app (WhatsApp, Facebook…): ${inAppBrowser ? 'SÍ' : 'no'}`);
+    try{
+      const st = await navigator.permissions.query({ name:'camera' });
+      out.push(`Permiso de cámara: ${ {granted:'concedido', denied:'DENEGADO', prompt:'se preguntará'}[st.state] || st.state }`);
+    }catch{ out.push('Permiso de cámara: el navegador no lo informa'); }
+    try{
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      out.push(`Cámaras detectadas: ${devs.filter(d => d.kind === 'videoinput').length}`);
+    }catch{ out.push('Cámaras detectadas: no se pudo consultar'); }
+    out.push(`Último error: ${lastError}`);
+    out.push(`Dirección: ${location.protocol}//${location.host}`);
+    $('diag').textContent = out.join('\n');
+  });
+
+  /* ---------- Controles ---------- */
+  btnPlay.addEventListener('click', toggle);
+  $('btnReset').addEventListener('click', resetText);
+  speed.addEventListener('input', e => setLevel(+e.target.value));
+  $('slower').addEventListener('click', () => setLevel(cfg.level - 1));
+  $('faster').addEventListener('click', () => setLevel(cfg.level + 1));
+  camStartB.addEventListener('click', startCamera);
+  camStopB.addEventListener('click', stopCamera);
+  camRestartB.addEventListener('click', restartCamera);
+
+  document.addEventListener('keydown', e => {
+    if(e.target === scriptTa) return;
+    switch(e.key){
+      case ' ': case 'PageDown': case 'Enter': e.preventDefault(); toggle(); break;
+      case 'ArrowUp': e.preventDefault(); setLevel(cfg.level + 1); break;
+      case 'ArrowDown': e.preventDefault(); setLevel(cfg.level - 1); break;
+      case 'Home': case 'PageUp': e.preventDefault(); resetText(); break;
+    }
+  });
+  new ResizeObserver(layout).observe(prompter);
+  window.addEventListener('beforeunload', stopTracks);
+
+  /* ---------- Inicio ---------- */
+  scriptTa.value = store.get('tp-script', DEFAULT_SCRIPT);
+  renderScript(scriptTa.value);
+  applyCfg();
+  setCam('off');
+  document.fonts?.ready.then(layout);
+})();
+</script>
+</body>
+</html>
