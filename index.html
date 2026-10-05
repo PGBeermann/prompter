@@ -128,6 +128,26 @@ textarea{
 .scrim{position:absolute;inset:0;z-index:7;background:rgba(0,0,0,.4);display:none}
 .scrim.on{display:block}
 
+/* Carga de archivo */
+.filebar{display:flex;gap:.5rem}
+.filebar #btnLoad{flex:1;background:rgba(255,193,69,.16);border-color:rgba(255,193,69,.5)}
+
+/* Grabación */
+.tally.rec{background:var(--tally);animation:blink 1.2s steps(2,start) infinite}
+@keyframes blink{to{opacity:.25}}
+.recbar{display:flex;align-items:center;gap:.4rem;padding:.45rem .5rem;border-radius:12px;background:rgba(255,193,69,.14);border:1px solid rgba(255,193,69,.45);font-size:.8rem}
+.recbar[hidden]{display:none}
+.recbar span{flex:1;min-width:0}
+.recbar a,.clip a{color:var(--ink);background:var(--cue);text-decoration:none;font-weight:700;border-radius:10px;padding:.55rem .7rem;font-size:.8rem;white-space:nowrap}
+.recbar button,.clip button{min-height:36px;padding:0 .6rem;font-size:.8rem}
+.clips{display:grid;gap:.5rem}
+.clip{display:flex;align-items:center;gap:.4rem;padding:.5rem;border:1px solid var(--line);border-radius:12px;font-size:.82rem}
+.clip span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.empty{font-size:.82rem;color:var(--muted)}
+.toast{position:absolute;left:50%;top:3.2rem;transform:translateX(-50%);z-index:9;max-width:88%;padding:.55rem .8rem;border-radius:10px;background:var(--paper);color:var(--ink);font-size:.82rem;line-height:1.35;box-shadow:0 6px 20px rgba(0,0,0,.35);display:none}
+.toast.on{display:block}
+
+@media (prefers-reduced-motion:reduce){ .tally.rec{animation:none} }
 @media (prefers-reduced-motion:reduce){ .sheet,.dock{transition:none} }
 </style>
 </head>
@@ -152,7 +172,14 @@ textarea{
   <div class="guide" id="guide" aria-hidden="true"></div>
   <div class="countdown" id="countdown" aria-live="assertive"></div>
 
+  <div class="toast" id="toast" role="status"></div>
   <nav class="dock" id="dock">
+    <div class="recbar" id="recbar" hidden>
+      <span id="recInfo">Video listo</span>
+      <a id="recSave" download>Guardar</a>
+      <button id="recShare" hidden>Compartir</button>
+      <button class="icon" id="recClose" aria-label="Ocultar aviso" style="width:36px">×</button>
+    </div>
     <div class="row">
       <button class="icon" id="btnReset" aria-label="Volver al inicio del texto" title="Volver al inicio (Inicio)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
@@ -185,6 +212,15 @@ textarea{
   <aside class="sheet" id="sheet" aria-label="Ajustes">
     <h2>Guion y ajustes <button id="btnClose">Listo</button></h2>
     <label for="script">Guion (separa párrafos con una línea en blanco)</label>
+    <div class="filebar">
+      <button id="btnLoad" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 17v-6M9 14l3-3 3 3"/></svg>
+        Cargar archivo de texto
+      </button>
+      <button id="btnClear" type="button">Vaciar</button>
+      <input type="file" id="fileInput" accept=".txt,.md,.markdown,.text,text/plain,text/markdown" hidden>
+    </div>
+    <p class="hint" id="fileInfo" style="margin:.4rem 0 .5rem">Formatos: .txt o .md (UTF-8 o ANSI de Windows), hasta 2 MB.</p>
     <textarea id="script" spellcheck="true"></textarea>
 
     <label for="fontSize">Tamaño de letra: <span id="fontOut">34</span> px</label>
@@ -196,9 +232,15 @@ textarea{
     <label for="bgOp">Oscurecer fondo del texto</label>
     <input type="range" id="bgOp" min="0" max="90" step="5" value="55">
 
+    <div class="toggle"><span>Grabar video al iniciar la cámara</span><input type="checkbox" id="autoRec" checked></div>
+    <div class="toggle"><span>Incluir audio del micrófono</span><input type="checkbox" id="useMic" checked></div>
     <div class="toggle"><span>Espejar texto (para cristal reflector)</span><input type="checkbox" id="flipText"></div>
     <div class="toggle"><span>Espejar vista de cámara frontal</span><input type="checkbox" id="mirrorVideo" checked></div>
     <div class="toggle"><span>Cuenta regresiva de 3 s al leer</span><input type="checkbox" id="useCountdown" checked></div>
+
+    <label>Grabaciones de esta sesión</label>
+    <div class="clips" id="clips"><p class="empty">Aún no hay grabaciones. Se crean al detener la cámara.</p></div>
+    <p class="hint" style="margin-top:.5rem">Los videos viven en la memoria del navegador hasta que los guardes. Si cierras o recargas la página sin guardarlos, se pierden.</p>
 
     <label>Diagnóstico de cámara</label>
     <button id="btnDiag" style="width:100%">Revisar por qué no conecta</button>
@@ -237,7 +279,7 @@ Edita este texto desde el botón de ajustes.`;
     get(k, d){ try{ const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); }catch{ return d; } },
     set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
   };
-  const cfg = Object.assign({ level:6, font:34, guide:35, bg:55, flip:false, mirror:true, cd:true, facing:'user' }, store.get('tp-cfg', {}));
+  const cfg = Object.assign({ level:6, font:34, guide:35, bg:55, flip:false, mirror:true, cd:true, facing:'user', rec:true, mic:true }, store.get('tp-cfg', {}));
   const saveCfg = () => store.set('tp-cfg', cfg);
 
   /* ---------- Guion ---------- */
@@ -335,6 +377,13 @@ Edita este texto desde el botón de ajustes.`;
   prompter.addEventListener('pointercancel', () => { drag = null; });
   dock.addEventListener('pointerdown', () => dock.classList.remove('dim'));
 
+  /* ---------- Avisos ---------- */
+  const toastEl = $('toast'); let toastT = null;
+  function notify(msg, ms = 4000){
+    toastEl.textContent = msg; toastEl.classList.add('on');
+    clearTimeout(toastT); toastT = setTimeout(() => toastEl.classList.remove('on'), ms);
+  }
+
   /* ---------- Cámara ---------- */
   let stream = null, lastError = 'ninguno';
   function setCam(state, msg){
@@ -345,6 +394,7 @@ Edita este texto desde el botón de ajustes.`;
     camStartB.disabled = state === 'live' || state === 'wait';
     camStopB.disabled = state !== 'live';
     camRestartB.disabled = state === 'off' || state === 'wait';
+    camStopB.textContent = (state === 'live' && cfg.rec) ? 'Detener y guardar' : 'Detener';
   }
   const inFrame = (() => { try{ return window.self !== window.top; }catch{ return true; } })();
   const policyBlocks = () => {
@@ -353,12 +403,12 @@ Edita este texto desde el botón de ajustes.`;
   };
   const inAppBrowser = /FBAN|FBAV|Instagram|WhatsApp|Line\/|MicroMessenger|TikTok|Snapchat/i.test(navigator.userAgent);
 
-  // Intenta de la configuración más exigente a la más simple
-  async function openStream(){
+  // Intenta de la configuración de video más exigente a la más simple
+  async function tryVideo(audio){
     const attempts = [
-      { audio:false, video:{ facingMode:{ ideal:cfg.facing }, width:{ ideal:1280 }, height:{ ideal:720 } } },
-      { audio:false, video:{ facingMode:cfg.facing } },
-      { audio:false, video:true }
+      { audio, video:{ facingMode:{ ideal:cfg.facing }, width:{ ideal:1280 }, height:{ ideal:720 } } },
+      { audio, video:{ facingMode:cfg.facing } },
+      { audio, video:true }
     ];
     let lastErr;
     for(const c of attempts){
@@ -370,6 +420,19 @@ Edita este texto desde el botón de ajustes.`;
     }
     throw lastErr;
   }
+  // Con micrófono si está activado; si el micrófono falla, sigue solo con video
+  async function openStream(){
+    if(cfg.mic){
+      try{ return await tryVideo({ echoCancellation:true, noiseSuppression:true, autoGainControl:true }); }
+      catch(e){
+        if(e.name === 'SecurityError') throw e;
+        const s2 = await tryVideo(false);
+        notify('Se grabará sin audio: no hay permiso o no se encontró micrófono.');
+        return s2;
+      }
+    }
+    return tryVideo(false);
+  }
 
   async function startCamera(){
     if(!window.isSecureContext){ setCam('err','La cámara solo funciona con HTTPS o en localhost. Publica la página con un certificado SSL.'); return; }
@@ -379,12 +442,15 @@ Edita este texto desde el botón de ajustes.`;
     setCam('wait');
     try{
       stream = await openStream();
-      stream.getVideoTracks().forEach(t => t.addEventListener('ended', () => { stopCamera(); setCam('off','La cámara se desconectó. Toca «Reiniciar» o «Iniciar cámara».'); }));
+      stream.getVideoTracks().forEach(t => t.addEventListener('ended', () => {
+        stopCamera('La cámara se desconectó. Toca «Reiniciar» o «Iniciar cámara».');
+      }));
       video.srcObject = stream;
       await video.play().catch(() => {});
       applyMirror();
       setCam('live');
       wake(true);
+      startRecording();
     }catch(err){
       stream = null;
       const m = {
@@ -399,13 +465,128 @@ Edita este texto desde el botón de ajustes.`;
     }
   }
   function stopTracks(){ if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; } video.srcObject = null; }
-  function stopCamera(){ stopTracks(); setCam('off','Toca «Iniciar cámara» para ver tu imagen detrás del texto.'); if(!playing) wake(false); }
-  async function restartCamera(){ stopTracks(); setCam('wait'); await new Promise(r => setTimeout(r, 300)); startCamera(); }
+  // Cierra primero la grabación (para que el archivo quede completo) y luego apaga la cámara
+  async function stopCamera(msg){
+    camStopB.disabled = camRestartB.disabled = true;
+    await stopRecording();
+    stopTracks();
+    setCam('off', typeof msg === 'string' ? msg : 'Toca «Iniciar cámara» para ver tu imagen detrás del texto.');
+    if(!playing) wake(false);
+  }
+  async function restartCamera(){
+    camStopB.disabled = camRestartB.disabled = true;
+    await stopRecording();
+    stopTracks(); setCam('wait');
+    await new Promise(r => setTimeout(r, 300));
+    startCamera();
+  }
   function applyMirror(){ video.classList.toggle('mirror', cfg.mirror && cfg.facing === 'user'); }
   $('camFlip').addEventListener('click', () => {
     cfg.facing = cfg.facing === 'user' ? 'environment' : 'user'; saveCfg();
     if(stream) restartCamera(); else applyMirror();
   });
+
+  /* ---------- Grabación (MediaRecorder) ---------- */
+  let recorder = null, recStart = 0, recTimer = null, recResolve = null;
+  const clips = [];
+  // MP4 primero (se reproduce en casi cualquier equipo); WebM como respaldo en Chrome/Firefox
+  function pickMime(){
+    if(!('MediaRecorder' in window)) return null;
+    const types = [
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4',
+      'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'
+    ];
+    for(const t of types){ try{ if(MediaRecorder.isTypeSupported(t)) return t; }catch{} }
+    return '';
+  }
+  const fmtTime = ms => { const t = Math.round(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2,'0')}`; };
+  const fmtSize = b => b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+
+  function startRecording(){
+    if(!cfg.rec || !stream) return;
+    const mime = pickMime();
+    if(mime === null){ notify('Este navegador no permite grabar video. Usa Chrome o Safari actualizados.'); return; }
+    const opts = { videoBitsPerSecond:2500000, audioBitsPerSecond:128000 };
+    if(mime) opts.mimeType = mime;
+    let r;
+    try{ r = new MediaRecorder(stream, opts); }
+    catch{ try{ r = new MediaRecorder(stream); }catch(e){ notify(`No se pudo iniciar la grabación (${e.name}).`); return; } }
+    const chunks = [];
+    const type = (r.mimeType || mime || 'video/webm').split(';')[0];
+    r.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+    r.onerror = e => notify(`Error de grabación: ${e.error?.name || 'desconocido'}`);
+    r.onstop = () => {
+      clearInterval(recTimer); recTimer = null;
+      const dur = Date.now() - recStart;
+      const blob = new Blob(chunks, { type });
+      const clip = blob.size ? addClip(blob, dur, type) : null;
+      if(recorder === r) recorder = null;
+      tally.classList.remove('rec');
+      if(recResolve){ recResolve(clip); recResolve = null; }
+    };
+    r.start(1000); // fragmentos de 1 s: si algo falla, se conserva casi todo
+    recorder = r; recStart = Date.now();
+    tally.classList.add('rec');
+    const tick = () => { if(recorder) camState.textContent = `Grabando ${fmtTime(Date.now() - recStart)}`; };
+    tick(); recTimer = setInterval(tick, 500);
+  }
+  function stopRecording(){
+    return new Promise(res => {
+      if(!recorder || recorder.state === 'inactive'){ recorder = null; res(null); return; }
+      recResolve = res;
+      try{ recorder.stop(); }catch{ recorder = null; recResolve = null; res(null); }
+    });
+  }
+
+  function addClip(blob, dur, type){
+    const d = new Date(), z = n => String(n).padStart(2,'0');
+    const ext = type.includes('mp4') ? 'mp4' : 'webm';
+    const name = `telepronter-${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.${ext}`;
+    const clip = { id:Date.now(), name, type, blob, dur, url:URL.createObjectURL(blob), saved:false };
+    clips.unshift(clip);
+    renderClips(); showRecbar(clip);
+    return clip;
+  }
+  const canShare = clip => {
+    try{ return !!navigator.canShare && navigator.canShare({ files:[new File([clip.blob], clip.name, { type:clip.type })] }); }
+    catch{ return false; }
+  };
+  async function shareClip(clip){
+    try{
+      await navigator.share({ files:[new File([clip.blob], clip.name, { type:clip.type })], title:clip.name });
+      clip.saved = true;
+    }catch(e){ if(e.name !== 'AbortError') notify('No se pudo compartir. Usa «Guardar».'); }
+  }
+  function removeClip(clip){
+    URL.revokeObjectURL(clip.url);
+    clips.splice(clips.indexOf(clip), 1);
+    if(recbar.dataset.id == clip.id) recbar.hidden = true;
+    renderClips();
+  }
+  const recbar = $('recbar');
+  function showRecbar(clip){
+    recbar.dataset.id = clip.id;
+    $('recInfo').textContent = `Video listo: ${fmtTime(clip.dur)}, ${fmtSize(clip.blob.size)}`;
+    const a = $('recSave'); a.href = clip.url; a.download = clip.name; a.onclick = () => { clip.saved = true; };
+    const sh = $('recShare'); sh.hidden = !canShare(clip); sh.onclick = () => shareClip(clip);
+    recbar.hidden = false; dock.classList.remove('dim');
+  }
+  $('recClose').addEventListener('click', () => { recbar.hidden = true; });
+  function renderClips(){
+    const box = $('clips');
+    if(!clips.length){ box.innerHTML = '<p class="empty">Aún no hay grabaciones. Se crean al detener la cámara.</p>'; return; }
+    box.innerHTML = '';
+    clips.forEach(c => {
+      const row = document.createElement('div'); row.className = 'clip';
+      const info = document.createElement('span'); info.textContent = `${fmtTime(c.dur)} · ${fmtSize(c.blob.size)} · ${c.name.slice(12, 25)}`;
+      const a = document.createElement('a'); a.href = c.url; a.download = c.name; a.textContent = 'Guardar'; a.onclick = () => { c.saved = true; };
+      row.append(info, a);
+      if(canShare(c)){ const b = document.createElement('button'); b.textContent = 'Compartir'; b.onclick = () => shareClip(c); row.append(b); }
+      const del = document.createElement('button'); del.textContent = 'Borrar'; del.setAttribute('aria-label', `Borrar ${c.name}`);
+      del.onclick = () => { if(c.saved || confirm('¿Borrar este video sin guardarlo?')) removeClip(c); };
+      row.append(del); box.append(row);
+    });
+  }
 
   /* ---------- Mantener pantalla encendida ---------- */
   let lock = null;
@@ -427,6 +608,7 @@ Edita este texto desde el botón de ajustes.`;
     inner.classList.toggle('flip', cfg.flip);
     $('fontSize').value = cfg.font; $('guidePos').value = cfg.guide; $('bgOp').value = cfg.bg;
     $('flipText').checked = cfg.flip; $('mirrorVideo').checked = cfg.mirror; $('useCountdown').checked = cfg.cd;
+    $('autoRec').checked = cfg.rec; $('useMic').checked = cfg.mic;
     speed.value = cfg.level; applyMirror(); layout();
   }
   const openSheet = () => { pause(); sheet.classList.add('open'); scrim.classList.add('on'); };
@@ -441,6 +623,81 @@ Edita este texto desde el botón de ajustes.`;
   $('flipText').addEventListener('change', e => { cfg.flip = e.target.checked; saveCfg(); applyCfg(); });
   $('mirrorVideo').addEventListener('change', e => { cfg.mirror = e.target.checked; saveCfg(); applyMirror(); });
   $('useCountdown').addEventListener('change', e => { cfg.cd = e.target.checked; saveCfg(); });
+  $('autoRec').addEventListener('change', e => {
+    cfg.rec = e.target.checked; saveCfg();
+    if(stream && cfg.rec && !recorder) startRecording();
+    else if(!cfg.rec && recorder) stopRecording().then(() => { if(stream) camState.textContent = 'En vivo'; });
+    if(stream) camStopB.textContent = cfg.rec ? 'Detener y guardar' : 'Detener';
+  });
+  $('useMic').addEventListener('change', e => {
+    cfg.mic = e.target.checked; saveCfg();
+    if(stream) notify('El cambio de micrófono se aplica al reiniciar la cámara.');
+  });
+
+  /* ---------- Carga de guion desde archivo ---------- */
+  const MAX_FILE = 2 * 1024 * 1024;
+  // UTF-8 estricto; si falla, ANSI de Windows (archivos antiguos del Bloc de notas con tildes y ñ)
+  function decodeText(buf){
+    try{ return new TextDecoder('utf-8', { fatal:true }).decode(buf); }
+    catch{ return new TextDecoder('windows-1252').decode(buf); }
+  }
+  // Quita la sintaxis Markdown más común y deja solo el texto que se va a leer en voz alta
+  function stripMarkdown(t){
+    return t
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '')
+      .replace(/^[ \t]{0,3}>[ \t]?/gm, '')
+      .replace(/^[ \t]*[-*+][ \t]+/gm, '')
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/(\*\*|__)(.+?)\1/g, '$2')
+      .replace(/(\*|_)(.+?)\1/g, '$2')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/^[ \t]*([-*_][ \t]*){3,}$/gm, '');
+  }
+  function normalizeText(t){
+    return t.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  async function loadFile(file){
+    if(!file) return;
+    const isMd = /\.(md|markdown)$/i.test(file.name);
+    const okType = /\.(txt|text|md|markdown)$/i.test(file.name) || file.type.startsWith('text/');
+    if(!okType){ notify('Ese archivo no es de texto. Usa un .txt o .md.'); return; }
+    if(file.size > MAX_FILE){ notify(`El archivo pesa ${fmtSize(file.size)}; el límite es 2 MB.`); return; }
+    if(scriptTa.value.trim() && scriptTa.value !== DEFAULT_SCRIPT &&
+       !confirm('Esto reemplaza el guion actual. ¿Continuar?')) return;
+    try{
+      let text = decodeText(await file.arrayBuffer()).replace(/\r\n?/g, '\n');
+      if(isMd) text = stripMarkdown(text);
+      text = normalizeText(text);
+      if(!text){ notify('El archivo está vacío.'); return; }
+      scriptTa.value = text;
+      store.set('tp-script', text);
+      renderScript(text);
+      resetText();
+      const n = (text.match(/\S+/g) || []).length;
+      $('fileInfo').textContent = `Cargado: ${file.name} (${n} palabras).`;
+      notify(`Guion cargado: ${n} palabras.`);
+    }catch(e){
+      notify(`No se pudo leer el archivo (${e.name || 'error'}).`);
+    }
+  }
+  const fileInput = $('fileInput');
+  $('btnLoad').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => { loadFile(fileInput.files[0]); fileInput.value = ''; });
+  $('btnClear').addEventListener('click', () => {
+    if(!scriptTa.value.trim() || confirm('¿Vaciar el guion?')){
+      scriptTa.value = ''; store.set('tp-script', ''); renderScript(''); resetText(); scriptTa.focus();
+      $('fileInfo').textContent = 'Formatos: .txt o .md (UTF-8 o ANSI de Windows), hasta 2 MB.';
+    }
+  });
+  // Arrastrar y soltar (útil al probar desde computadora)
+  const stageEl = $('stage');
+  stageEl.addEventListener('dragover', e => { if(e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
+  stageEl.addEventListener('drop', e => {
+    const f = e.dataTransfer?.files?.[0];
+    if(f){ e.preventDefault(); loadFile(f); }
+  });
 
   /* ---------- Diagnóstico ---------- */
   $('btnDiag').addEventListener('click', async () => {
@@ -459,6 +716,8 @@ Edita este texto desde el botón de ajustes.`;
       const devs = await navigator.mediaDevices.enumerateDevices();
       out.push(`Cámaras detectadas: ${devs.filter(d => d.kind === 'videoinput').length}`);
     }catch{ out.push('Cámaras detectadas: no se pudo consultar'); }
+    const mt = pickMime();
+    out.push(`Grabación disponible: ${mt === null ? 'NO' : 'sí (' + (mt || 'formato por defecto') + ')'}`);
     out.push(`Último error: ${lastError}`);
     out.push(`Dirección: ${location.protocol}//${location.host}`);
     $('diag').textContent = out.join('\n');
@@ -484,7 +743,10 @@ Edita este texto desde el botón de ajustes.`;
     }
   });
   new ResizeObserver(layout).observe(prompter);
-  window.addEventListener('beforeunload', stopTracks);
+  window.addEventListener('beforeunload', e => {
+    if(recorder || clips.some(c => !c.saved)){ e.preventDefault(); e.returnValue = ''; return; }
+    stopTracks();
+  });
 
   /* ---------- Inicio ---------- */
   scriptTa.value = store.get('tp-script', DEFAULT_SCRIPT);
